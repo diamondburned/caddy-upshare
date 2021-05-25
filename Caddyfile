@@ -1,0 +1,18 @@
+# Example Caddyfile.
+{
+	admin off
+	order sharer before file_server
+}
+
+http://127.0.0.1:29475 {
+	root * /home/diamond/Pictures
+
+	handle_path /share/* {
+		sharer * /tmp/shares
+		file_server browse
+	}
+
+	handle * {
+		respond "Nothing here :)"
+	}
+}

@@ -1,18 +1,43 @@
 # Example Caddyfile.
 {
 	admin off
-	order sharer before file_server
+	order sharer   before file_server
+	order uploader after  sharer
 }
 
 http://127.0.0.1:29475 {
 	root * /home/diamond/Pictures
 
-	handle_path /share/* {
-		sharer * /tmp/shares
+	@auth not {
+		method GET
+		path   /share/*
+	}
+
+	basicauth @auth {
+		# Password: 123
+		user JDJhJDE0JHhBdy5JSXVlLy41UVpOdVJPT3ZhVU9NcWVjV2taMkxIQlZkdG1OQzQ3bC54bHdHdWdxZklD
+	}
+
+	# GET  /share/share-code
+	# POST /share?path=/path/to/file
+	handle_path /share* {
+		sharer /tmp/shares
 		file_server browse
 	}
 
-	handle * {
-		respond "Nothing here :)"
+	# POST   /upload?files=
+	# POST   /upload?dir=
+	# DELETE /upload?files=
+	handle_path /upload* {
+		uploader
+		redir /browse{path} 303 # See Other
 	}
+
+	handle_path /browse* {
+		file_server {
+			browse
+		}
+	}
+
+	redir / /browse
 }

@@ -17,16 +17,29 @@ import (
 )
 
 func init() {
-	caddy.RegisterModule(Sharer{})
+	caddy.RegisterModule(&Sharer{})
 	httpcaddyfile.RegisterHandlerDirective("sharer", parseSharerDirective)
 }
 
+// parseSharerDirective parses the sharer directive like so:
+//
+//    sharer [<matcher>] <symlink>
+//
+func parseSharerDirective(parser httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error) {
+	var sharer Sharer
+
+	if !parser.Args(&sharer.Symlink) {
+		return nil, parser.Err("missing symlink argument")
+	}
+
+	return &sharer, nil
+}
+
 type Sharer struct {
-	Root    string `json:"root,omitempty"`
 	Symlink string `json:"symlink"`
 }
 
-func (sh Sharer) CaddyModule() caddy.ModuleInfo {
+func (sh *Sharer) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{
 		ID:  "http.handlers.sharer",
 		New: func() caddy.Module { return &Sharer{} },
@@ -34,19 +47,15 @@ func (sh Sharer) CaddyModule() caddy.ModuleInfo {
 }
 
 func (sh *Sharer) Provision(ctx caddy.Context) error {
-	if sh.Root == "" {
-		sh.Root = "{http.vars.root}"
-	}
-
 	ent, err := os.Stat(sh.Symlink)
 	if err != nil {
 		if err := os.MkdirAll(sh.Symlink, os.ModePerm); err != nil {
 			return errors.Wrap(err, "failed to initialize symlink dir")
 		}
-	} else {
-		if !ent.IsDir() {
-			return errors.Wrap(err, "symlink path is not a directory")
-		}
+	}
+
+	if err == nil && !ent.IsDir() {
+		return errors.Wrap(err, "symlink path is not a directory")
 	}
 
 	return nil
@@ -55,16 +64,16 @@ func (sh *Sharer) Provision(ctx caddy.Context) error {
 func (sh *Sharer) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	switch r.Method {
 	case "GET":
-		return sh.get(w, r, next)
-	case "POST", "PUT":
-		return sh.post(w, r)
+		return writeErr(w, sh.get(w, r, next))
+	case "POST":
+		return writeErr(w, sh.post(w, r))
 	default:
 		return caddyhttp.Error(http.StatusMethodNotAllowed, nil)
 	}
 }
 
-// splitFromPath gets the share ID and the relative path from the URL path.
-func splitFromPath(path string) (id, file string) {
+// splitIDFromPath gets the share ID and the relative path from the URL path.
+func splitIDFromPath(path string) (id, file string) {
 	// Accept either with or without the prefixing slash.
 	if strings.HasPrefix(path, "/") {
 		path = strings.TrimPrefix(path, "/")
@@ -78,62 +87,63 @@ func splitFromPath(path string) (id, file string) {
 	return parts[0], parts[1]
 }
 
-func (sh *Sharer) symlinkDir(r *http.Request) string {
-	repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
-	root := repl.ReplaceAll(sh.Symlink, ".")
-	return root
+type shareDirs struct {
+	Root    string
+	Symlink string
 }
 
-func (sh *Sharer) rootDir(r *http.Request) string {
+func (sh *Sharer) dirs(r *http.Request) (shareDirs, error) {
 	repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
-	root := repl.ReplaceAll(sh.Root, ".")
-	return root
+
+	root, ok := repl.GetString("http.vars.root")
+	if !ok || !strings.HasPrefix(root, "/") {
+		return shareDirs{}, ErrNoRoot
+	}
+
+	return shareDirs{
+		Root:    root,
+		Symlink: repl.ReplaceAll(sh.Symlink, "."),
+	}, nil
 }
 
 func (sh *Sharer) get(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	id, tail := splitFromPath(r.URL.Path)
+	dirs, err := sh.dirs(r)
+	if err != nil {
+		return err
+	}
+
+	id, tail := splitIDFromPath(r.URL.Path)
 	if id == "" {
 		return caddyhttp.Error(http.StatusNotFound, nil)
 	}
 
-	// Force a trailing slash at the end if tail is empty.
-	if tail == "" && !strings.HasSuffix(r.URL.Path, "/") {
-		// Dot paths are weird. If there isn't a trailing slash, then going to
-		// ./ actually overrides the last part in path with nothing. We have to
-		// accomodate for that.
-		_, last := path.Split(r.URL.Path)
-		redirect(w, http.StatusPermanentRedirect, last+"/")
-		return nil
-	}
+	linkPath := filepath.Join(dirs.Symlink, id)
 
-	linkPath := filepath.Join(sh.symlinkDir(r), id)
 	dst, err := os.Readlink(linkPath)
 	if err != nil {
 		// Pretend that a non-symlink is a non-existent file.
 		return caddyhttp.Error(http.StatusNotFound, nil)
 	}
 
-	// Resolve the absolute path for the root directory. If this ever errors, it
-	// should be fine to be transparent and return the error.
-	prefix, err := filepath.Abs(sh.rootDir(r))
-	if err != nil {
-		return caddyhttp.Error(http.StatusServiceUnavailable, err)
-	}
-
 	// Rewrite the path and continue. Preserve the trailing slash.
-	r.URL.Path = path.Clean("/"+strings.TrimPrefix(dst, prefix)) + tail
+	r.URL.Path = path.Clean("/"+strings.TrimPrefix(dst, dirs.Root)) + tail
 	r.RequestURI = r.URL.RequestURI()
 
 	return next.ServeHTTP(w, r)
 }
 
 func (sh *Sharer) post(w http.ResponseWriter, r *http.Request) error {
-	path := r.FormValue("path")
-	if path == "" {
-		return caddyhttp.Error(http.StatusInternalServerError, errors.New("missing ?path="))
+	dirs, err := sh.dirs(r)
+	if err != nil {
+		return err
 	}
 
-	src := filepath.Join(sh.rootDir(r), path)
+	src := r.FormValue("path")
+	if src == "" {
+		return caddyhttp.Error(http.StatusBadRequest, errors.New("missing ?path="))
+	}
+
+	src = filepath.Join(dirs.Root, src)
 
 	// Check if the file exists.
 	if _, err := os.Stat(src); err != nil {
@@ -153,7 +163,7 @@ func (sh *Sharer) post(w http.ResponseWriter, r *http.Request) error {
 
 		// Try symlinking in a busy loop to prevent other routines from
 		// colliding the symlink.
-		if err := os.Symlink(src, filepath.Join(sh.symlinkDir(r), linkName)); err == nil {
+		if err := os.Symlink(src, filepath.Join(dirs.Symlink, linkName)); err == nil {
 			break
 		}
 
@@ -164,66 +174,12 @@ func (sh *Sharer) post(w http.ResponseWriter, r *http.Request) error {
 
 		select {
 		case <-r.Context().Done():
-			return caddyhttp.Error(http.StatusServiceUnavailable, r.Context().Err())
+			return caddyhttp.Error(http.StatusInternalServerError, r.Context().Err())
 		case now = <-retryTick.C:
 			continue
 		}
 	}
 
-	// Success. SeeOther redirects the POST to GET. Use a small hack here to
-	// redirect to the right path.
-	nest := strings.Count(r.URL.Path, "/")
-	nest--
-
-	redirect(w, http.StatusSeeOther, strings.Repeat("../", nest)+linkName)
+	http.Redirect(w, r, path.Join(origPath(r), linkName), http.StatusSeeOther)
 	return nil
-}
-
-func redirect(w http.ResponseWriter, code int, path string) {
-	w.Header().Set("Location", path)
-	w.WriteHeader(code)
-}
-
-// parseSharerDirective parses the sharer directive like so:
-//
-//    sharer [<symlink>] {
-//        symlink <symlink_dir>
-//        root    <root>
-//    }
-//
-func parseSharerDirective(parser httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error) {
-	var sharer Sharer
-
-	for parser.Next() {
-		args := parser.RemainingArgs()
-
-		switch len(args) {
-		case 0:
-			// block
-		case 1:
-			sharer.Symlink = args[0]
-			continue
-		default:
-			return nil, parser.ArgErr()
-		}
-
-		for parser.NextBlock(0) {
-			switch parser.Val() {
-			case "symlink":
-				if !parser.Args(&sharer.Symlink) {
-					return nil, parser.ArgErr()
-				}
-			case "root":
-				if !parser.Args(&sharer.Root) {
-					return nil, parser.ArgErr()
-				}
-			}
-		}
-	}
-
-	if sharer.Symlink == "" {
-		return nil, parser.Err("missing symlink target")
-	}
-
-	return &sharer, nil
 }

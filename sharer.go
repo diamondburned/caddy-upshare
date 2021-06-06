@@ -62,6 +62,10 @@ func (sh *Sharer) Provision(ctx caddy.Context) error {
 }
 
 func (sh *Sharer) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+	if err := requestBacksOff(r); err != nil {
+		return err
+	}
+
 	switch r.Method {
 	case "GET":
 		return writeErr(w, sh.get(w, r, next))

@@ -5,6 +5,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -16,7 +17,7 @@ import (
 )
 
 func init() {
-	caddy.RegisterModule((*Uploader)(nil))
+	caddy.RegisterModule(&Uploader{})
 	httpcaddyfile.RegisterHandlerDirective("uploader", parseUploaderDirective)
 }
 
@@ -25,7 +26,7 @@ func init() {
 //    uploader [<matcher>]
 //
 func parseUploaderDirective(httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error) {
-	return (*Uploader)(nil), nil
+	return &Uploader{}, nil
 }
 
 type Uploader struct{}
@@ -33,7 +34,7 @@ type Uploader struct{}
 func (u *Uploader) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{
 		ID:  "http.handlers.uploader",
-		New: func() caddy.Module { return (*Uploader)(nil) },
+		New: func() caddy.Module { return &Uploader{} },
 	}
 }
 
@@ -49,31 +50,51 @@ func (u *Uploader) rootDir(r *http.Request) (string, error) {
 }
 
 func (u *Uploader) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+	if err := requestBacksOff(r); err != nil {
+		return err
+	}
+
 	switch r.Method {
 	case "POST":
 		return writeErr(w, u.post(w, r, next))
 	case "DELETE":
-		return writeErr(w, u.delete(w, r))
+		return writeErr(w, u.delete(w, r, next))
 	default:
 		return caddyhttp.Error(http.StatusMethodNotAllowed, nil)
 	}
 }
 
-func (u *Uploader) delete(w http.ResponseWriter, r *http.Request) error {
+func (u *Uploader) delete(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+	root, err := u.rootDir(r)
+	if err != nil {
+		return err
+	}
+
 	if err := r.ParseForm(); err != nil {
 		return caddyhttp.Error(http.StatusBadRequest, err)
 	}
 
 	files, _ := r.Form["files"]
 	if len(files) == 0 {
-		return caddyhttp.Error(http.StatusBadRequest, errors.New("missing ?file="))
+		return caddyhttp.Error(http.StatusBadRequest, errors.New("missing ?files="))
 	}
 
+	deletedFiles := make([]string, 0, len(files))
+
 	for _, file := range files {
-		if err := os.Remove(file); err != nil {
+		filepath := path.Join(root, r.URL.Path, file)
+
+		if err := os.RemoveAll(filepath); err != nil {
 			return caddyhttp.Error(http.StatusInternalServerError, err)
 		}
+
+		deletedFiles = append(deletedFiles, path.Join(r.URL.Path, file))
 	}
+
+	replaceURI(r, r.URL.Path, url.Values{
+		"upload-type": {"delete"},
+		"upload-path": deletedFiles,
+	})
 
 	return nil
 }
@@ -96,8 +117,11 @@ func (u *Uploader) post(w http.ResponseWriter, r *http.Request, next caddyhttp.H
 			return caddyhttp.Error(http.StatusInternalServerError, err)
 		}
 
-		r.URL.Path = path.Join(r.URL.Path, dir) + "/"
-		r.RequestURI = r.URL.RequestURI()
+		newPath := path.Join(r.URL.Path, dir) + "/"
+		replaceURI(r, newPath, url.Values{
+			"upload-type": {"directory"},
+			"upload-path": {newPath},
+		})
 
 		return next.ServeHTTP(w, r)
 	}
@@ -107,23 +131,41 @@ func (u *Uploader) post(w http.ResponseWriter, r *http.Request, next caddyhttp.H
 		return caddyhttp.Error(http.StatusBadRequest, errors.New("missing ?files="))
 	}
 
+	uploadedFiles := make([]string, 0, len(files))
+
 	for _, multipartFile := range files {
-		filename := path.Join(root, r.URL.Path, multipartFile.Filename)
+		filepath := path.Join(root, r.URL.Path, multipartFile.Filename)
 
 		// Screw Windows. I don't care.
-		if err := os.MkdirAll(path.Dir(filename), os.ModePerm); err != nil {
+		if err := os.MkdirAll(path.Dir(filepath), os.ModePerm); err != nil {
 			return caddyhttp.Error(http.StatusInternalServerError, err)
 		}
 
-		if err := copyMultipart(multipartFile, filename); err != nil {
+		if err := copyMultipart(multipartFile, filepath); err != nil {
 			return err
 		}
+
+		uploadedFiles = append(uploadedFiles, path.Join(r.URL.Path, multipartFile.Filename))
 	}
 
-	r.URL.Path = path.Join(r.URL.Path, r.URL.Path)
-	r.RequestURI = r.URL.RequestURI()
+	replaceURI(r, r.URL.Path, url.Values{
+		"upload-type": {"file"},
+		"upload-path": uploadedFiles,
+	})
 
 	return next.ServeHTTP(w, r)
+}
+
+func replaceURI(r *http.Request, path string, values url.Values) {
+	query := r.URL.Query()
+	for k, v := range values {
+		query[k] = v
+	}
+
+	r.URL.Path = path
+	r.URL.RawPath = ""
+	r.URL.RawQuery = query.Encode()
+	r.RequestURI = r.URL.RequestURI()
 }
 
 func copyMultipart(h *multipart.FileHeader, into string) error {

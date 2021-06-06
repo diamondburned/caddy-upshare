@@ -1,12 +1,12 @@
 # Example Caddyfile.
 {
 	admin off
-	order sharer   before file_server
-	order uploader after  sharer
+	order sharer   last
+	order uploader last
 }
 
 http://127.0.0.1:29475 {
-	root * /home/diamond/Pictures
+	root * /tmp/caddytest/
 
 	@auth not {
 		method GET
@@ -20,22 +20,24 @@ http://127.0.0.1:29475 {
 
 	# GET  /share/share-code
 	# POST /share?path=/path/to/file
-	handle_path /share* {
+	route /share* {
+		uri strip_prefix /share
 		sharer /tmp/shares
 		file_server browse
 	}
 
-	# POST   /upload?files=
-	# POST   /upload?dir=
+	# POST   /upload?files=Y
+	# POST   /upload?dir=X
 	# DELETE /upload?files=
-	handle_path /upload* {
+	route /upload* {
+		uri strip_prefix /upload
 		uploader
-		redir /browse{path} 303 # See Other
+		redir * /browse{uri} 303 # See Other
 	}
 
 	handle_path /browse* {
 		file_server {
-			browse
+			browse ./browsetmpl.html
 		}
 	}
 

@@ -3,6 +3,7 @@ package upshare
 import (
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"github.com/pkg/errors"
@@ -42,4 +43,27 @@ func origPath(r *http.Request) string {
 }
 
 // ErrNoRoot is returned when there is no root directive set.
-var ErrNoRoot = caddyhttp.Error(http.StatusInternalServerError, errors.New("no root directive"))
+var ErrNoRoot = caddyhttp.Error(
+	http.StatusInternalServerError,
+	errors.New("no root directive"),
+)
+
+// ErrBackoffNotAllowed is returned when a path contains ../.
+var ErrBackoffNotAllowed = caddyhttp.Error(
+	http.StatusBadRequest,
+	errors.New("directory backoff not allowed"),
+)
+
+func requestBacksOff(r *http.Request) error {
+	// Ensure that the Contains below works.
+	if !strings.HasPrefix(r.URL.Path, "/") {
+		r.URL.Path = "/" + r.URL.Path
+	}
+
+	if strings.Contains(r.URL.Path, "/..") {
+		// Reject paths with ..
+		return ErrBackoffNotAllowed
+	}
+
+	return nil
+}

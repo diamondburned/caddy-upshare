@@ -3,6 +3,7 @@ package upshare
 import (
 	"errors"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -54,13 +55,17 @@ func (u *Uploader) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyh
 		return err
 	}
 
-	switch r.Method {
-	case "POST":
-		return writeErr(w, u.post(w, r, next))
-	case "DELETE":
-		return writeErr(w, u.delete(w, r, next))
-	default:
+	if r.Method != "POST" {
 		return caddyhttp.Error(http.StatusMethodNotAllowed, nil)
+	}
+
+	switch popPath(&r.URL.Path) {
+	case "delete":
+		return writeErr(w, u.delete(w, r, next))
+	case "upload":
+		return writeErr(w, u.upload(w, r, next))
+	default:
+		return caddyhttp.Error(http.StatusNotFound, nil)
 	}
 }
 
@@ -82,6 +87,11 @@ func (u *Uploader) delete(w http.ResponseWriter, r *http.Request, next caddyhttp
 	deletedFiles := make([]string, 0, len(files))
 
 	for _, file := range files {
+		if file == "" || file == "." {
+			// Removing current directory not allowed.
+			continue
+		}
+
 		filepath := path.Join(root, r.URL.Path, file)
 
 		if err := os.RemoveAll(filepath); err != nil {
@@ -96,10 +106,10 @@ func (u *Uploader) delete(w http.ResponseWriter, r *http.Request, next caddyhttp
 		"upload-path": deletedFiles,
 	})
 
-	return nil
+	return next.ServeHTTP(w, r)
 }
 
-func (u *Uploader) post(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+func (u *Uploader) upload(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	root, err := u.rootDir(r)
 	if err != nil {
 		return err
@@ -157,15 +167,12 @@ func (u *Uploader) post(w http.ResponseWriter, r *http.Request, next caddyhttp.H
 }
 
 func replaceURI(r *http.Request, path string, values url.Values) {
-	query := r.URL.Query()
-	for k, v := range values {
-		query[k] = v
-	}
-
 	r.URL.Path = path
 	r.URL.RawPath = ""
-	r.URL.RawQuery = query.Encode()
+	r.URL.RawQuery = values.Encode()
 	r.RequestURI = r.URL.RequestURI()
+
+	log.Println("new URI:", r.RequestURI)
 }
 
 func copyMultipart(h *multipart.FileHeader, into string) error {

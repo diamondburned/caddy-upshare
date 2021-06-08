@@ -22,7 +22,7 @@ http://127.0.0.1:29475 {
 	# POST /share?path=/path/to/file
 	route /share* {
 		uri strip_prefix /share
-		sharer /tmp/shares
+		sharer * /tmp/shares
 		file_server browse
 	}
 

@@ -28,6 +28,9 @@ func init() {
 func parseSharerDirective(parser httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error) {
 	var sharer Sharer
 
+	if !parser.Next() {
+		return nil, parser.ArgErr()
+	}
 	if !parser.Args(&sharer.Symlink) {
 		return nil, parser.Err("missing symlink argument")
 	}
@@ -167,8 +170,14 @@ func (sh *Sharer) post(w http.ResponseWriter, r *http.Request) error {
 
 		// Try symlinking in a busy loop to prevent other routines from
 		// colliding the symlink.
-		if err := os.Symlink(src, filepath.Join(dirs.Symlink, linkName)); err == nil {
+		err := os.Symlink(src, filepath.Join(dirs.Symlink, linkName))
+		if err == nil {
 			break
+		}
+
+		if !os.IsExist(err) {
+			// Error isn't a collision error; bail.
+			return caddyhttp.Error(http.StatusInternalServerError, err)
 		}
 
 		if retryTick == nil {

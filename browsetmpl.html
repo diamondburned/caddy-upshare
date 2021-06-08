@@ -203,32 +203,38 @@
 				justify-content: space-between;
 			}
 
-			form.action-forms,
-			form.action-forms > button {
+			.glowy,
+			.action-forms {
+				border: none;
+				background: none;
 				line-height: 0;
 			}
 
-			form.action-forms > button {
-				border: none;
-				background: none;
+			.action-forms > *:first-child:not(button) {
+				margin-right: 0.5em;
+			}
 
-				color: #FFFFFF55;
+			.glowy {
+				color: #FFFFFF77;
 				transition: linear 75ms color;
 			}
-			form.action-forms > button:hover {
+			.glowy:hover {
 				color: #FFFFFFFF;
 			}
-			form.action-forms.delete > button:hover {
-				color: #FF0000FF;
-			}
 
-			form.action-forms > button > svg {
+			.glowy > svg {
 				transition: linear 75ms filter;
 			}
-			form.action-forms > button:hover > svg {
+			.glowy:hover > svg {
 				filter: drop-shadow(0 0 5px white);
 			}
-			form.action-forms.delete > button:hover > svg {
+
+			input.checkbox {
+				display: none;
+			}
+
+			input.delete:checked + label.delete > svg {
+				color: #FF0000FF;
 				filter: drop-shadow(0 0 5px red);
 			}
 
@@ -324,6 +330,27 @@
 
 				background-color: #EEE1;
 				color: inherit;
+			}
+
+			#delete-form {
+				display: flex;
+				justify-content: end;
+			}
+
+			#delete-form button.delete-button {
+				margin:  1.5em 5%;
+				padding: 0.5em;
+
+				border-radius: 5px;
+				border: 1px solid #FF0000CC;
+				background-color: #FF000011;
+
+				display: flex;
+				align-items: center;
+			}
+
+			#delete-form button.delete-button > span {
+				margin: 0 0.25em;
 			}
 
 			@media (max-width: 600px) {
@@ -483,17 +510,17 @@
 				{{range $i, $crumb := .Breadcrumbs}}<a href="{{html $crumb.Link}}">{{html $crumb.Text}}</a>{{if ne $i 0}}/{{end}}{{end}}
 			</h1>
 			<div id="uploader">
-				<form class="action-forms" id="upload-files" method="post" enctype="multipart/form-data" action="/upload{{ .Path }}">
+				<form class="action-forms" id="upload-files" method="post" enctype="multipart/form-data" action="/upload/upload{{ .Path }}">
 					<input type="file" name="files" multiple>
-					<button type="submit">
+					<button type="submit" class="glowy">
 						<svg width="1.5em" height="1.5em" version="1.1" fill="none" viewBox="0 0 24 24">
 							<use xlink:href="#upload"></use>
 						</svg>
 					</button>
 				</form>
-				<form class="action-forms" id="create-directory" method="post" enctype="multipart/form-data" action="/upload{{ .Path }}">
+				<form class="action-forms" id="create-directory" method="post" enctype="multipart/form-data" action="/upload/upload{{ .Path }}">
 					<input type="text" name="dir" placeholder="Create Folder">
-					<button type="submit">
+					<button type="submit" class="glowy">
 						<svg width="1.3em" height="1.3em" version="1.1" fill="none" viewBox="0 0 24 24">
 							<use xlink:href="#folder-add"></use>
 						</svg>
@@ -647,7 +674,7 @@
 							<td class="hideable"></td>
 						</tr>
 						{{- end}}
-						{{- range .Items}}
+						{{- range $i, $item := .Items}}
 						<tr class="file">
 							<td></td>
 							<td>
@@ -672,27 +699,33 @@
 							<td class="hideable"><time datetime="{{.HumanModTime "2006-01-02T15:04:05Z"}}">{{.HumanModTime "01/02/2006 03:04:05 PM -07:00"}}</time></td>
 							<td class="action-column">
 								<form class="action-forms share" method="post" action="/share">
-									<input type="hidden" name="path" value="{{ $.Path }}/{{ .Name }}">
-									<button type="submit">
+									<input type="hidden" name="path" value="{{$.Path}}/{{.Name}}">
+									<button type="submit" class="glowy">
 										<svg width="1.5em" height="1.5em" version="1.1" fill="none" viewBox="0 0 24 24">
 											<use xlink:href="#share"></use>
 										</svg>
 									</button>
 								</form>
-								<form class="action-forms delete" method="delete" action="/upload">
-									<input type="hidden" name="files" value="{{ $.Path }}/{{ .Name }}">
-									<button type="submit">
-										<svg width="1.5em" height="1.5em" version="1.1" fill="none" viewBox="0 0 24 24">
-											<use xlink:href="#trash"></use>
-										</svg>
-									</button>
-								</form>
+								<input id="file-{{$i}}"class="delete checkbox" type="checkbox" name="files" value="{{ .Name }}" form="delete-form">
+								<label for="file-{{$i}}" class="delete checkbox glowy">
+									<svg width="1.5em" height="1.5em" version="1.1" fill="none" viewBox="0 0 24 24">
+										<use xlink:href="#trash"></use>
+									</svg>
+								</label>
 							</td>
 							<td></td>
 						</tr>
 						{{- end}}
 					</tbody>
 				</table>
+				<form class="listing seamless" id="delete-form" method="post" action="/upload/delete{{ .Path }}">
+					<button type="submit" class="delete-button glowy">
+						<span>Delete selected item(s)</span>
+						<svg width="1.5em" height="1.5em" version="1.1" fill="none" viewBox="0 0 24 24">
+							<use xlink:href="#trash"></use>
+						</svg>
+					</button>
+				</form>
 			</div>
 		</main>
 		<footer>

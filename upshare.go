@@ -67,3 +67,23 @@ func requestBacksOff(r *http.Request) error {
 
 	return nil
 }
+
+func popPath(path *string) string {
+	parts := strings.SplitN(*path, "/", 3)
+	if parts[0] == "" {
+		parts = parts[1:]
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	if len(parts) == 1 {
+		parts = append(parts, "/")
+	} else {
+		parts[1] = "/" + parts[1]
+	}
+
+	*path = strings.Join(parts[1:], "/")
+	return parts[0]
+}

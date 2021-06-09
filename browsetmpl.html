@@ -505,10 +505,7 @@
 				</g>
 			</defs>
 		</svg>
-		{{ $root := "/" }}
-		{{ if gt (len .Breadcrumbs) 1 }}
-		{{ $root = repeat (len .Breadcrumbs) "../" }}
-		{{ end }}
+		{{ $root := printf "%s/../" (trimSuffix (placeholder "http.request.uri.path") (placeholder "http.request.orig_uri.path")) }}
 		<header>
 			<h1>
 				{{range $i, $crumb := .Breadcrumbs}}<a href="{{html $crumb.Link}}">{{html $crumb.Text}}</a>{{if ne $i 0}}/{{end}}{{end}}

@@ -37,6 +37,8 @@ http://127.0.0.1:29475 {
 
 	handle_path /browse* {
 		file_server {
+			# The template requires /upload and /share to be on the parent of
+			# /browse.
 			browse ./browsetmpl.html
 		}
 	}

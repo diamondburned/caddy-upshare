@@ -133,7 +133,10 @@ func (sh *Sharer) get(w http.ResponseWriter, r *http.Request, next caddyhttp.Han
 	}
 
 	// Rewrite the path and continue. Preserve the trailing slash.
-	r.URL.Path = path.Clean("/"+strings.TrimPrefix(dst, dirs.Root)) + tail
+	r.URL.Path = path.Join("/"+strings.TrimPrefix(dst, dirs.Root), tail)
+	if strings.HasSuffix(tail, "/") {
+		r.URL.Path += "/"
+	}
 	r.RequestURI = r.URL.RequestURI()
 
 	return next.ServeHTTP(w, r)

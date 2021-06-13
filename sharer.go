@@ -87,6 +87,15 @@ func splitIDFromPath(path string) (id, file string) {
 	}
 
 	parts := strings.SplitN(path, "/", 2)
+	if len(parts) < 1 {
+		return "", ""
+	}
+
+	// Trim the file extension if any.
+	if strings.Contains(parts[0], ".") {
+		parts[0] = strings.Split(parts[0], ".")[0]
+	}
+
 	if len(parts) < 2 {
 		return parts[0], ""
 	}
@@ -196,6 +205,9 @@ func (sh *Sharer) post(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
-	http.Redirect(w, r, path.Join(origPath(r), linkName), http.StatusSeeOther)
+	// Append the file extension and redirect.
+	dst := path.Join(origPath(r), linkName) + path.Ext(src)
+	http.Redirect(w, r, dst, http.StatusSeeOther)
+
 	return nil
 }

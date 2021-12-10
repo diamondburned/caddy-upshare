@@ -679,7 +679,7 @@
 						<tr class="file">
 							<td></td>
 							<td>
-								<a href="{{html .URL}}">
+								<a href="{{html (trimPrefix "/" .URL)}}">
 									{{- if .IsDir}}
 									<svg width="1.5em" height="1em" version="1.1" viewBox="0 0 317 259">
 										<use xlink:href="#folder{{if .IsSymlink}}-shortcut{{end}}"></use>

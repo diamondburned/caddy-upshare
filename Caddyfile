@@ -43,5 +43,5 @@ http://127.0.0.1:29475 {
 		}
 	}
 
-	redir / /browse
+	redir / /browse{uri}
 }
